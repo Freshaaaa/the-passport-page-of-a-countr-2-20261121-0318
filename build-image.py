@@ -9,7 +9,8 @@ running it twice produces a byte-identical PNG.
 
 import hashlib
 import os
-from PIL import Image, ImageDraw, ImageFont
+import random
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 W, H = 1024, 724
 CREAM = (246, 241, 227)
@@ -89,9 +90,20 @@ def lighthouse(draw, cx, top, scale=1.0):
 
 
 def portrait():
-    """Flat passport-style portrait: woman, dark hair, plain background."""
+    """Passport-style portrait, photo-like: woman, dark hair, navy blazer.
+    Gentle background gradient, soft radial light on the face, a shadow under
+    the chin, irises with catchlights, muted lips and hair strands — restrained,
+    like a real passport photo, not a cartoon."""
     pw, ph = 120, 150
-    img = Image.new("RGB", (pw, ph), PORTRAIT_BG)
+    # background: gentle vertical gradient, lighter at the top
+    top = (200, 209, 216)
+    bottom = (166, 178, 190)
+    grad = Image.new("RGB", (1, ph))
+    gpx = grad.load()
+    for y in range(ph):
+        t = y / (ph - 1)
+        gpx[0, y] = tuple(int(top[i] + (bottom[i] - top[i]) * t) for i in range(3))
+    img = grad.resize((pw, ph)).convert("RGBA")
     d = ImageDraw.Draw(img)
     # hair back (shoulder length)
     d.rounded_rectangle([28, 4, 92, 148], radius=18, fill=HAIR)
@@ -109,19 +121,45 @@ def portrait():
     d.rounded_rectangle([77, 34, 87, 122], radius=5, fill=HAIR)
     d.ellipse([36, 10, 84, 46], fill=HAIR)
     d.ellipse([40, 22, 80, 92], fill=SKIN)
-    # brows
-    d.line([46, 54, 56, 53], fill=HAIR, width=2)
-    d.line([64, 53, 74, 54], fill=HAIR, width=2)
-    # eyes
-    d.ellipse([48, 58, 54, 62], fill=(30, 28, 26))
-    d.ellipse([66, 58, 72, 62], fill=(30, 28, 26))
-    # nose
+    # hair strands: a few darker + lighter threads, softer edge
+    strand_dark = (28, 22, 20)
+    strand_light = (88, 70, 58)
+    d.arc([36, 6, 84, 52], 200, 340, fill=strand_dark, width=1)
+    d.arc([40, 10, 80, 46], 210, 330, fill=strand_light, width=1)
+    d.line([36, 40, 38, 90], fill=strand_dark, width=1)
+    d.line([84, 40, 82, 90], fill=strand_dark, width=1)
+    # soft light + shadow on the face (blurred, low alpha) — photo-like shading
+    overlay = Image.new("RGBA", (pw, ph), (0, 0, 0, 0))
+    od = ImageDraw.Draw(overlay)
+    od.ellipse([46, 28, 74, 56], fill=(255, 246, 230, 52))   # light, upper face
+    od.ellipse([54, 78, 80, 94], fill=(110, 70, 45, 36))     # shadow under chin
+    od.ellipse([74, 42, 84, 78], fill=(110, 70, 45, 20))     # shadow, right cheek
+    overlay = overlay.filter(ImageFilter.GaussianBlur(6))
+    img = Image.alpha_composite(img, overlay)
+    d = ImageDraw.Draw(img)
+    # brows, slightly arched
+    d.line([46, 54, 51, 52], fill=HAIR, width=2)
+    d.line([51, 52, 56, 53], fill=HAIR, width=2)
+    d.line([64, 53, 69, 52], fill=HAIR, width=2)
+    d.line([69, 52, 74, 54], fill=HAIR, width=2)
+    # eyes: sclera, iris, pupil, catchlight
+    for cx in (51, 69):
+        d.ellipse([cx - 4, 58, cx + 4, 63], fill=(242, 236, 228))
+        d.ellipse([cx - 3, 58, cx + 3, 63], fill=(94, 62, 40))
+        d.ellipse([cx - 2, 59, cx + 2, 62], fill=(22, 18, 16))
+        d.ellipse([cx - 2, 58, cx - 1, 59], fill=(255, 255, 255))
+    # lash line
+    d.line([47, 57, 55, 57], fill=HAIR, width=1)
+    d.line([65, 57, 73, 57], fill=HAIR, width=1)
+    # nose: soft shadow + highlight
     d.line([60, 62, 59, 72], fill=SKIN_DARK, width=2)
-    # mouth
-    d.arc([53, 76, 67, 84], 20, 160, fill=(122, 70, 60), width=2)
+    d.line([61, 64, 61, 71], fill=(240, 205, 168), width=1)
+    # mouth: muted closed lips
+    d.ellipse([54, 77, 66, 83], fill=(158, 100, 88))
+    d.line([55, 80, 65, 80], fill=(110, 62, 54), width=1)
     # frame
     d.rectangle([0, 0, pw - 1, ph - 1], outline=NAVY, width=2)
-    return img
+    return img.convert("RGB")
 
 
 def field(draw, x, y, label, value, label_size=10, value_size=14, width=200):
@@ -130,27 +168,51 @@ def field(draw, x, y, label, value, label_size=10, value_size=14, width=200):
 
 
 def stamp(text_lines, border, accent, rotate_deg, emblem="anchor"):
-    """One entry/exit stamp on its own layer, slightly rotated."""
+    """One entry/exit stamp on its own layer, slightly rotated.
+    Irregular, uneven ink like a real rubber stamp: a faint ghost border
+    (the stamp shifted a touch), a slightly fainter outer border, and
+    deterministic faded patches where the stamp was pressed unevenly."""
     sw, sh = 410, 104
     layer = Image.new("RGBA", (sw + 24, sh + 24), (0, 0, 0, 0))
     d = ImageDraw.Draw(layer)
     x0, y0 = 12, 12
+    ink = tuple(border) + (255,)
+    faint = tuple(border) + (60,)
+    # faint ghost border, offset 1px (the stamp shifted a touch on the page)
+    d.rounded_rectangle([x0 + 1, y0 + 1, x0 + sw + 1, y0 + sh + 1], radius=10,
+                        outline=faint, width=3)
+    # outer border, slightly fainter than the inner one
     d.rounded_rectangle([x0, y0, x0 + sw, y0 + sh], radius=10,
-                        outline=border, width=3)
+                        outline=tuple(border) + (215,), width=3)
     d.rounded_rectangle([x0 + 4, y0 + 4, x0 + sw - 4, y0 + sh - 4], radius=8,
-                        outline=border, width=1)
+                        outline=ink, width=1)
     # emblem: circle with a small anchor
     ex, ey, er = x0 + 16, y0 + sh // 2, 26
-    d.ellipse([ex, ey - er, ex + 2 * er, ey + er], outline=border, width=2)
-    d.line([ex + er, ey - 14, ex + er, ey + 12], fill=border, width=2)
-    d.arc([ex + er - 8, ey + 4, ex + er + 8, ey + 18], 0, 180, fill=border, width=2)
-    d.line([ex + er - 10, ey - 4, ex + er + 10, ey - 4], fill=border, width=2)
-    d.ellipse([ex + er - 3, ey - 17, ex + er + 3, ey - 11], outline=border, width=2)
+    d.ellipse([ex, ey - er, ex + 2 * er, ey + er], outline=ink, width=2)
+    d.line([ex + er, ey - 14, ex + er, ey + 12], fill=ink, width=2)
+    d.arc([ex + er - 8, ey + 4, ex + er + 8, ey + 18], 0, 180, fill=ink, width=2)
+    d.line([ex + er - 10, ey - 4, ex + er + 10, ey - 4], fill=ink, width=2)
+    d.ellipse([ex + er - 3, ey - 17, ex + er + 3, ey - 11], outline=ink, width=2)
     # country + entry/exit
     tx = x0 + 84
-    text(d, (tx, y0 + 10), text_lines[0], font(SANS_BOLD, 17), fill=border)
-    text(d, (tx, y0 + 38), text_lines[1], font(SANS, 13), fill=border)
-    text(d, (tx, y0 + 60), text_lines[2], font(SANS, 13), fill=border)
+    text(d, (tx, y0 + 10), text_lines[0], font(SANS_BOLD, 17), fill=ink)
+    text(d, (tx, y0 + 38), text_lines[1], font(SANS, 13), fill=ink)
+    text(d, (tx, y0 + 60), text_lines[2], font(SANS, 13), fill=ink)
+    # uneven ink: deterministic faded patches (pressed unevenly).
+    # Fixed seed per country so each stamp fades differently, yet every run
+    # produces the same image.
+    seed = 20261121 + sum(ord(c) for c in text_lines[0])
+    rng = random.Random(seed)
+    mask = Image.new("L", layer.size, 255)
+    md = ImageDraw.Draw(mask)
+    for _ in range(52):
+        x = rng.randint(0, layer.width - 1)
+        y = rng.randint(0, layer.height - 1)
+        r = rng.randint(3, 10)
+        md.ellipse([x - r, y - r, x + r, y + r], fill=rng.randint(170, 235))
+    mask = mask.filter(ImageFilter.GaussianBlur(2))
+    r_, g_, b_, a_ = layer.split()
+    layer = Image.merge("RGBA", (r_, g_, b_, ImageChops.multiply(a_, mask)))
     return layer.rotate(rotate_deg, resample=Image.BICUBIC, expand=False)
 
 
