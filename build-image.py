@@ -90,76 +90,17 @@ def lighthouse(draw, cx, top, scale=1.0):
 
 
 def portrait():
-    """Passport-style portrait, photo-like: woman, dark hair, navy blazer.
-    Gentle background gradient, soft radial light on the face, a shadow under
-    the chin, irises with catchlights, muted lips and hair strands — restrained,
-    like a real passport photo, not a cartoon."""
+    """Passport portrait from the photorealistic photo (fictional person):
+    loads portrait.png (240x300, centre-cropped 4:5), resizes it to the
+    120x150 box and adds the same navy frame as before."""
     pw, ph = 120, 150
-    # background: gentle vertical gradient, lighter at the top
-    top = (200, 209, 216)
-    bottom = (166, 178, 190)
-    grad = Image.new("RGB", (1, ph))
-    gpx = grad.load()
-    for y in range(ph):
-        t = y / (ph - 1)
-        gpx[0, y] = tuple(int(top[i] + (bottom[i] - top[i]) * t) for i in range(3))
-    img = grad.resize((pw, ph)).convert("RGBA")
+    here = os.path.dirname(os.path.abspath(__file__))
+    photo = Image.open(os.path.join(here, "portrait.png")).convert("RGB")
+    # portrait.png is already 4:5; resize to the box, then frame it
+    img = photo.resize((pw, ph), Image.LANCZOS)
     d = ImageDraw.Draw(img)
-    # hair back (shoulder length)
-    d.rounded_rectangle([28, 4, 92, 148], radius=18, fill=HAIR)
-    # shoulders / blazer
-    d.polygon([(6, 150), (114, 150), (106, 106), (76, 94), (44, 94), (14, 106)], fill=BLAZER)
-    # shirt V
-    d.polygon([(52, 96), (68, 96), (60, 118)], fill=(240, 236, 224))
-    # neck
-    d.rectangle([52, 84, 68, 98], fill=SKIN_DARK)
-    # face
-    d.ellipse([38, 20, 82, 92], fill=SKIN)
-    # hair top + side locks over the face
-    d.pieslice([32, 2, 88, 58], 180, 360, fill=HAIR)
-    d.rounded_rectangle([33, 34, 43, 122], radius=5, fill=HAIR)
-    d.rounded_rectangle([77, 34, 87, 122], radius=5, fill=HAIR)
-    d.ellipse([36, 10, 84, 46], fill=HAIR)
-    d.ellipse([40, 22, 80, 92], fill=SKIN)
-    # hair strands: a few darker + lighter threads, softer edge
-    strand_dark = (28, 22, 20)
-    strand_light = (88, 70, 58)
-    d.arc([36, 6, 84, 52], 200, 340, fill=strand_dark, width=1)
-    d.arc([40, 10, 80, 46], 210, 330, fill=strand_light, width=1)
-    d.line([36, 40, 38, 90], fill=strand_dark, width=1)
-    d.line([84, 40, 82, 90], fill=strand_dark, width=1)
-    # soft light + shadow on the face (blurred, low alpha) — photo-like shading
-    overlay = Image.new("RGBA", (pw, ph), (0, 0, 0, 0))
-    od = ImageDraw.Draw(overlay)
-    od.ellipse([46, 28, 74, 56], fill=(255, 246, 230, 52))   # light, upper face
-    od.ellipse([54, 78, 80, 94], fill=(110, 70, 45, 36))     # shadow under chin
-    od.ellipse([74, 42, 84, 78], fill=(110, 70, 45, 20))     # shadow, right cheek
-    overlay = overlay.filter(ImageFilter.GaussianBlur(6))
-    img = Image.alpha_composite(img, overlay)
-    d = ImageDraw.Draw(img)
-    # brows, slightly arched
-    d.line([46, 54, 51, 52], fill=HAIR, width=2)
-    d.line([51, 52, 56, 53], fill=HAIR, width=2)
-    d.line([64, 53, 69, 52], fill=HAIR, width=2)
-    d.line([69, 52, 74, 54], fill=HAIR, width=2)
-    # eyes: sclera, iris, pupil, catchlight
-    for cx in (51, 69):
-        d.ellipse([cx - 4, 58, cx + 4, 63], fill=(242, 236, 228))
-        d.ellipse([cx - 3, 58, cx + 3, 63], fill=(94, 62, 40))
-        d.ellipse([cx - 2, 59, cx + 2, 62], fill=(22, 18, 16))
-        d.ellipse([cx - 2, 58, cx - 1, 59], fill=(255, 255, 255))
-    # lash line
-    d.line([47, 57, 55, 57], fill=HAIR, width=1)
-    d.line([65, 57, 73, 57], fill=HAIR, width=1)
-    # nose: soft shadow + highlight
-    d.line([60, 62, 59, 72], fill=SKIN_DARK, width=2)
-    d.line([61, 64, 61, 71], fill=(240, 205, 168), width=1)
-    # mouth: muted closed lips
-    d.ellipse([54, 77, 66, 83], fill=(158, 100, 88))
-    d.line([55, 80, 65, 80], fill=(110, 62, 54), width=1)
-    # frame
     d.rectangle([0, 0, pw - 1, ph - 1], outline=NAVY, width=2)
-    return img.convert("RGB")
+    return img
 
 
 def field(draw, x, y, label, value, label_size=10, value_size=14, width=200):
