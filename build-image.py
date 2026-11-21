@@ -108,25 +108,69 @@ def field(draw, x, y, label, value, label_size=10, value_size=14, width=200):
     text(draw, (x, y + 14), value, font(SANS_BOLD, value_size), fill=NAVY)
 
 
+def _jittered_rect(draw, x0, y0, x1, y1, radius, rng, fill, width,
+                   jitter=1.3, gaps=0):
+    """Rounded-rectangle border with a hand-stamped wobble: every perimeter
+    point is jittered a touch, and optionally a few short stretches are
+    erased where the ink skipped. Deterministic (uses the caller's rng)."""
+    import math
+    pts = []
+
+    def arc(cx, cy, r, a0, a1):
+        n = max(2, int(abs(a1 - a0) * r / 6))
+        for i in range(n + 1):
+            a = math.radians(a0 + (a1 - a0) * i / n)
+            pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+
+    def edge(xa, ya, xb, yb):
+        n = max(2, int(math.hypot(xb - xa, yb - ya) / 6))
+        for i in range(n + 1):
+            pts.append((xa + (xb - xa) * i / n, ya + (yb - ya) * i / n))
+
+    edge(x0 + radius, y0, x1 - radius, y0)              # top
+    arc(x1 - radius, y0 + radius, radius, -90, 0)       # top-right corner
+    edge(x1, y0 + radius, x1, y1 - radius)              # right
+    arc(x1 - radius, y1 - radius, radius, 0, 90)        # bottom-right corner
+    edge(x1 - radius, y1, x0 + radius, y1)              # bottom
+    arc(x0 + radius, y1 - radius, radius, 90, 180)      # bottom-left corner
+    edge(x0, y1 - radius, x0, y0 + radius)              # left
+    arc(x0 + radius, y0 + radius, radius, 180, 270)     # top-left corner
+    jpts = [(px + rng.uniform(-jitter, jitter),
+             py + rng.uniform(-jitter, jitter)) for px, py in pts]
+    draw.line(jpts + [jpts[0]], fill=fill, width=width, joint="curve")
+    for _ in range(gaps):
+        i = rng.randrange(4, len(jpts) - 8)
+        draw.line(jpts[i:i + 5], fill=(0, 0, 0, 0), width=width + 1)
+
+
 def stamp(text_lines, border, accent, rotate_deg, emblem="anchor"):
     """One entry/exit stamp on its own layer, slightly rotated.
-    Irregular, uneven ink like a real rubber stamp: a faint ghost border
-    (the stamp shifted a touch), a slightly fainter outer border, and
-    deterministic faded patches where the stamp was pressed unevenly."""
+    Irregular, uneven ink like a real rubber stamp: a wobbling border with
+    a few gaps where the ink skipped, a faint double impression (the stamp
+    bounced when it hit the page), and deterministic faded patches, coarse
+    dry areas and fine grain where it was pressed unevenly. All randomness
+    uses one fixed seed per country, so every run produces the same image."""
     sw, sh = 410, 104
     layer = Image.new("RGBA", (sw + 24, sh + 24), (0, 0, 0, 0))
     d = ImageDraw.Draw(layer)
     x0, y0 = 12, 12
     ink = tuple(border) + (255,)
-    faint = tuple(border) + (60,)
-    # faint ghost border, offset 1px (the stamp shifted a touch on the page)
-    d.rounded_rectangle([x0 + 1, y0 + 1, x0 + sw + 1, y0 + sh + 1], radius=10,
-                        outline=faint, width=3)
-    # outer border, slightly fainter than the inner one
-    d.rounded_rectangle([x0, y0, x0 + sw, y0 + sh], radius=10,
-                        outline=tuple(border) + (215,), width=3)
-    d.rounded_rectangle([x0 + 4, y0 + 4, x0 + sw - 4, y0 + sh - 4], radius=8,
-                        outline=ink, width=1)
+    # Fixed seed per country so each stamp wears differently, yet every run
+    # produces the same image. (The rng is created here so the border wobble,
+    # the ink gaps and the masks below all draw from one sequence.)
+    seed = 20261121 + sum(ord(c) for c in text_lines[0])
+    rng = random.Random(seed)
+    # double impression: ghost of the whole frame, offset (2,1), faint —
+    # the stamp bounced a touch when it hit the page
+    _jittered_rect(d, x0 + 2, y0 + 1, x0 + sw + 2, y0 + sh + 1, 10,
+                   rng, tuple(border) + (55,), 3, jitter=1.0)
+    # main outer border: wobbles like a hand-pressed stamp, with a few
+    # short gaps where the ink skipped
+    _jittered_rect(d, x0, y0, x0 + sw, y0 + sh, 10,
+                   rng, tuple(border) + (215,), 3, gaps=3)
+    # inner border, lightly wobbled too
+    _jittered_rect(d, x0 + 4, y0 + 4, x0 + sw - 4, y0 + sh - 4, 8,
+                   rng, ink, 1, jitter=0.8)
     # emblem: circle with a small anchor
     ex, ey, er = x0 + 16, y0 + sh // 2, 26
     d.ellipse([ex, ey - er, ex + 2 * er, ey + er], outline=ink, width=2)
@@ -140,10 +184,6 @@ def stamp(text_lines, border, accent, rotate_deg, emblem="anchor"):
     text(d, (tx, y0 + 38), text_lines[1], font(SANS, 13), fill=ink)
     text(d, (tx, y0 + 60), text_lines[2], font(SANS, 13), fill=ink)
     # uneven ink: deterministic faded patches (pressed unevenly).
-    # Fixed seed per country so each stamp fades differently, yet every run
-    # produces the same image.
-    seed = 20261121 + sum(ord(c) for c in text_lines[0])
-    rng = random.Random(seed)
     mask = Image.new("L", layer.size, 255)
     md = ImageDraw.Draw(mask)
     for _ in range(52):
@@ -152,17 +192,77 @@ def stamp(text_lines, border, accent, rotate_deg, emblem="anchor"):
         r = rng.randint(3, 10)
         md.ellipse([x - r, y - r, x + r, y + r], fill=rng.randint(170, 235))
     mask = mask.filter(ImageFilter.GaussianBlur(2))
+    # coarse uneven ink: a few larger faded areas where the stamp pad was
+    # dry or the page was pressed unevenly (kept light so text stays legible)
+    coarse = Image.new("L", layer.size, 255)
+    cd = ImageDraw.Draw(coarse)
+    for _ in range(16):
+        x = rng.randint(0, layer.width - 1)
+        y = rng.randint(0, layer.height - 1)
+        r = rng.randint(10, 24)
+        cd.ellipse([x - r, y - r, x + r, y + r], fill=rng.randint(160, 210))
+    coarse = coarse.filter(ImageFilter.GaussianBlur(6))
+    mask = ImageChops.multiply(mask, coarse)
+    # fine grain: the paper's tooth showing through thin ink
+    grain = Image.new("L", layer.size, 255)
+    gd = ImageDraw.Draw(grain)
+    for _ in range(500):
+        x = rng.randint(0, layer.width - 1)
+        y = rng.randint(0, layer.height - 1)
+        gd.point((x, y), fill=rng.randint(180, 240))
+    grain = grain.filter(ImageFilter.GaussianBlur(0.5))
+    mask = ImageChops.multiply(mask, grain)
     r_, g_, b_, a_ = layer.split()
     layer = Image.merge("RGBA", (r_, g_, b_, ImageChops.multiply(a_, mask)))
+    # slight ink bleed into the paper fibres
+    layer = layer.filter(ImageFilter.GaussianBlur(0.6))
     return layer.rotate(rotate_deg, resample=Image.BICUBIC, expand=False)
 
 
+def _bezier(p0, p1, p2, p3, n=20):
+    """Sample a cubic bezier curve (deterministic, no randomness)."""
+    pts = []
+    for i in range(n + 1):
+        t = i / n
+        mt = 1.0 - t
+        pts.append((
+            mt ** 3 * p0[0] + 3 * mt * mt * t * p1[0]
+            + 3 * mt * t * t * p2[0] + t ** 3 * p3[0],
+            mt ** 3 * p0[1] + 3 * mt * mt * t * p1[1]
+            + 3 * mt * t * t * p2[1] + t ** 3 * p3[1],
+        ))
+    return pts
+
+
 def signature(draw, x, y, w):
-    """A restrained hand-drawn signature squiggle + rule."""
-    pts = [(x + 4, y + 14), (x + 18, y + 4), (x + 30, y + 14), (x + 44, y + 6),
-           (x + 58, y + 14), (x + 74, y + 8), (x + 92, y + 14), (x + 110, y + 6),
-           (x + 128, y + 13)]
-    draw.line(pts, fill=NAVY, width=2, joint="curve")
+    """A flowing handwritten signature: an initial loop, a scrawled body
+    with pen lifts, and a long underline flourish — a quick cursive
+    signature, not readable text and not a zigzag. Drawn in a 170x16 box
+    above the rule; a softer wide pass under a crisp narrow pass gives
+    the stroke pen pressure."""
+    loop = (
+        ((10, 13), (5, 3), (16, 0), (24, 5)),
+        ((24, 5), (29, 11), (21, 15), (14, 13)),
+    )
+    body = (
+        ((18, 11), (26, 9), (31, 5), (38, 5)),
+        ((38, 5), (46, 5), (48, 11), (53, 13)),
+        ((53, 13), (57, 6), (65, 3), (73, 6)),
+        ((73, 6), (79, 10), (81, 13), (87, 12)),
+        ((87, 12), (89, 3), (99, 2), (103, 8)),
+        ((103, 8), (105, 13), (99, 15), (92, 13)),
+    )
+    flourish = (
+        ((98, 10), (112, 7), (128, 6), (146, 10)),
+        ((146, 10), (156, 14), (166, 12), (170, 5)),
+    )
+    for stroke in (loop, body, flourish):
+        pts = []
+        for seg in stroke:
+            pts.extend(_bezier(*seg))
+        pts = [(x + px, y + py) for px, py in pts]
+        draw.line(pts, fill=(70, 88, 125), width=3, joint="curve")
+        draw.line(pts, fill=NAVY, width=2, joint="curve")
     draw.line([x, y + 20, x + w, y + 20], fill=NAVY, width=1)
     text(draw, (x, y + 26), "HOLDER'S SIGNATURE", font(SANS, 9), fill=GREY)
 
