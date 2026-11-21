@@ -167,11 +167,45 @@ def signature(draw, x, y, w):
     text(draw, (x, y + 26), "HOLDER'S SIGNATURE", font(SANS, 9), fill=GREY)
 
 
+def _mrz_check_digit(field):
+    """ICAO 9303 check digit: weights 7,3,1 repeating; A=10..Z=35, '<'=0."""
+    weights = (7, 3, 1)
+    total = 0
+    for i, ch in enumerate(field):
+        if ch == "<":
+            value = 0
+        elif ch.isdigit():
+            value = int(ch)
+        else:
+            value = ord(ch) - 55  # A=10, B=11, ..., Z=35
+        total += value * weights[i % 3]
+    return str(total % 10)
+
+
 def mrz_lines():
-    line1_base = "P<MERIVOSS<<ELENA<MARA"
+    # Data page fields (must agree with the printed data above the MRZ band).
+    doc_number = "M20417783"   # passport M-2041-7783
+    nationality = "MER"
+    birth = "920314"           # 14 MAR 1992
+    sex = "F"
+    expiry = "340602"          # 02 JUN 2034
+    personal = "<" * 14         # no personal number on this document
+
+    # Line 1: type + issuing state + surname + separator + given names.
+    line1_base = "P<MER" + "VOSS<<ELENA<MARA"
     line1 = line1_base + "<" * (44 - len(line1_base))
-    line2_base = "M20417783<3MER9203148F3406023"
-    line2 = line2_base + "<" * (42 - len(line2_base)) + "02"
+
+    # Line 2 (TD3): doc number + check, nationality, birth + check, sex,
+    # expiry + check, personal number + check, composite check.
+    core = (
+        doc_number + _mrz_check_digit(doc_number)
+        + nationality
+        + birth + _mrz_check_digit(birth)
+        + sex
+        + expiry + _mrz_check_digit(expiry)
+        + personal + _mrz_check_digit(personal)
+    )
+    line2 = core + _mrz_check_digit(core)
     assert len(line1) == 44 and len(line2) == 44
     return line1, line2
 
